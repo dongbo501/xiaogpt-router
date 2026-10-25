@@ -1,0 +1,23 @@
+services:
+  xiaogpt:
+    build:
+      context: ../..
+      dockerfile: deploy/router/Dockerfile
+    image: xiaogpt-router:local
+    container_name: xiaogpt
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+      PYTHONUNBUFFERED: "1"
+      XIAOGPT_HOSTNAME: ${XIAOGPT_HOSTNAME:?Set the router LAN address in router.env}
+    volumes:
+      - ../../config:/config
+    command: ["--config=/config/config.yaml"]
+    labels:
+      com.centurylinklabs.watchtower.enable: "false"
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: "3"

@@ -1,0 +1,18 @@
+name: Router offline checks
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build router image
+        run: docker build -f deploy/router/Dockerfile -t xiaogpt-router:local .
+      - name: Run offline checks
+        run: |
+          docker run --rm --network none \
+            -v "$PWD/tests:/tests:ro" \
+            --entrypoint /app/.venv/bin/python xiaogpt-router:local \
+            -m unittest discover -s /tests -v

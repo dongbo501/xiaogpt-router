@@ -1,0 +1,28 @@
+# Copy to config/config.yaml and fill in your own values.
+hardware: L05C
+account: ""
+password: ""
+mi_did: ""
+use_command: true
+mute_xiaoai: true
+verbose: false
+bot: chatgptapi
+api_base: "https://api.example.com/v1"
+openai_key: ""
+gpt_options:
+  model: "YOUR_MODEL"
+keyword:
+  - 请问
+  - 请向我解释
+  - 请详细向我解释
+  - 补充
+start_conversation: 开始持续对话
+end_conversation: 结束持续对话
+prompt: >-
+  请用中文回答。仅输出适合语音播报的纯文本，不要输出图片、图片链接、代码、代码块、表格、网址或Markdown格式。
+  涉及这类内容时，仅用简短的文字说明。如果你的回答最后一句不是疑问句，请在最后说回答完了。
+stream: true
+tts: edge
+tts_options:
+  voice: zh-CN-XiaoxiaoNeural
+  volume: "+40%"
