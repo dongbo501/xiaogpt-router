@@ -33,6 +33,110 @@ from xiaogpt.utils import detect_language, parse_cookie_string
 EOF = object()
 PASS_TOKEN_KEYS = ("deviceId", "userId", "passToken")
 
+# Bare domains need a known suffix so names such as Node.js and filenames such
+# as report.pdf are not removed. Explicit URL schemes accept any hostname.
+_SPEECH_TLDS = (
+    "com|org|net|edu|gov|mil|int|cn|中国|中國|公司|网络|網絡|在线|"
+    "io|ai|app|dev|me|ink|sh|co|uk|us|de|fr|jp|kr|hk|tw|sg|au|ca|"
+    "ru|in|it|es|nl|ch|se|no|fi|dk|nz|za|br|mx|cc|tv|eu|ly|gg|to|"
+    "info|biz|xyz|top|site|online|tech|cloud|shop|store|wiki|news|"
+    "link|live|club|vip|pro|name|museum|travel|mobi|asia|work|world|website"
+)
+_SPEECH_DOMAIN = rf"(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+(?:{_SPEECH_TLDS})(?![a-z0-9-])"
+_SPEECH_URL_CHAR = r"[^\s<>\[\]{}\"'，。！？；、（）()]"
+_SPEECH_URL_TAIL = rf"(?:{_SPEECH_URL_CHAR}|\({_SPEECH_URL_CHAR}*\))*"
+_SPEECH_HOST = r"(?:\[[0-9a-f:]+\]|[a-z0-9.-]+|[\w.-]+\.(?:中国|中國|公司|网络|網絡|在线))"
+_SPEECH_URL = re.compile(
+    rf"(?:(?:https?|ftp)://|www\.){_SPEECH_HOST}(?::\d+)?(?:[/?#]{_SPEECH_URL_TAIL})?"
+    rf"|mailto:{_SPEECH_URL_TAIL}"
+    rf"|(?<![a-z0-9_.@-]){_SPEECH_DOMAIN}(?::\d+)?(?:[/?#]{_SPEECH_URL_TAIL})?",
+    re.IGNORECASE,
+)
+_SPEECH_MARKDOWN = re.compile(r"!?\[([^\]\n]*)\]\(")
+
+
+def strip_speech_links(text: str) -> str:
+    """Remove link destinations and citation-only labels, keeping human names."""
+    text = re.sub(r"\ue200[^\ue201]*(?:\ue201|$)", "", text)
+    start = 0
+    parts = []
+    while match := _SPEECH_MARKDOWN.search(text, start):
+        parts.append(text[start:match.start()])
+        end, depth = match.end(), 1
+        while end < len(text) and depth:
+            if text[end] == "\\":
+                end += 2
+                continue
+            if text[end] == "(":
+                depth += 1
+            elif text[end] == ")":
+                depth -= 1
+            end += 1
+        label = match[1].strip()
+        if not match[0].startswith("!") and not _SPEECH_URL.search(label) and not label.isdigit():
+            parts.append(label)
+        start = end
+    parts.append(text[start:])
+    text = _SPEECH_URL.sub("", "".join(parts))
+    text = re.sub(r"\[\d+(?:\s*[,，-]\s*\d+)*\]", "", text)
+    # URL-only Markdown citations often leave nested empty parentheses.
+    while True:
+        cleaned = re.sub(r"\(\s*\)|\[\s*\]|（\s*）|【\s*】|<\s*>|`\s*`", "", text)
+        if cleaned == text:
+            break
+        text = cleaned
+    return re.sub(r"[ \t]+", " ", text)
+
+
+async def filter_speech_links(text_stream: AsyncIterator[str]) -> AsyncIterator[str]:
+    """Filter complete sentences without waiting for the whole model answer.
+
+    Keep bracketed citations and URL query strings together even when the
+    upstream sentence splitter emits a chunk ending in a URL's '?' or ';'.
+    """
+    pending = []
+    brackets = []
+    closing = {"(": ")", "[": "]", "<": ">", "（": "）", "【": "】", "\ue200": "\ue201"}
+    token = ""
+    deferred_exclamation = False
+    async for chunk in text_stream:
+        for char in chunk:
+            # A leading '!' can be the start of a Markdown image, including
+            # when it is separated from '[' by an upstream chunk boundary.
+            if deferred_exclamation:
+                deferred_exclamation = False
+                if char != "[":
+                    text = strip_speech_links("".join(pending))
+                    if re.search(r"\w", text):
+                        yield text
+                    pending.clear()
+                    token = ""
+            pending.append(char)
+            if char in closing:
+                brackets.append(closing[char])
+            elif brackets and char == brackets[-1]:
+                brackets.pop()
+            if char.isspace() or char in "，。！？；、（）":
+                token = ""
+            else:
+                token += char
+            is_end = char in "。！？；\n!?;"
+            if char in "!?;" and _SPEECH_URL.search(token):
+                is_end = False
+            if char == "!" and is_end and not brackets:
+                deferred_exclamation = True
+                continue
+            if is_end and not brackets:
+                text = strip_speech_links("".join(pending))
+                if re.search(r"\w", text):
+                    yield text
+                pending.clear()
+                token = ""
+    if pending:
+        text = strip_speech_links("".join(pending))
+        if re.search(r"\w", text):
+            yield text
+
 
 class MiAccount(miservice.MiAccount):
     """Log in again with the last passToken before falling back to the password.
@@ -336,7 +440,7 @@ class MiGPT:
                 answer = self.chatbot.ask(query, **self.config.gpt_options)
             else:
                 answer = await self.chatbot.ask(query, **self.config.gpt_options)
-            message = self._normalize(answer) if answer else ""
+            message = answer if answer else ""
             yield message
             return
 
@@ -368,7 +472,7 @@ class MiGPT:
                     break
                 message += next_msg
             if message:
-                yield self._normalize(message)
+                yield message
         self.polling_event.clear()
         task.cancel()
 
@@ -461,7 +565,14 @@ class MiGPT:
                 await self.wakeup_xiaoai()
 
     async def speak(self, text_stream: AsyncIterator[str]) -> None:
-        first_chunk = await text_stream.__anext__()
+        async def spoken_text():
+            async for text in filter_speech_links(text_stream):
+                yield self._normalize(text)
+
+        filtered_stream = spoken_text()
+        first_chunk = await anext(filtered_stream, None)
+        if first_chunk is None:
+            return
         # Detect the language from the first chunk
         # Add suffix '-' because tetos expects it to exist when selecting voices
         # however, the nation code is never used.
@@ -469,7 +580,7 @@ class MiGPT:
 
         async def gen():  # reconstruct the generator
             yield first_chunk
-            async for text in text_stream:
+            async for text in filtered_stream:
                 yield text
 
         await self.tts.synthesize(lang, gen())
