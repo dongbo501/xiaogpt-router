@@ -37,6 +37,10 @@ class SpeechLinkTests(unittest.IsolatedAsyncioTestCase):
         text = "请查看[国家税务总局官网](https://example.com/a_(b)?q=1)，再搜索政策名称。"
         self.assertEqual(await filtered(list(text)), "请查看国家税务总局官网，再搜索政策名称。")
 
+    async def test_domain_citation_labels_match_the_destination_even_for_new_suffixes(self):
+        text = "汽车比较。([hima.auto](https://hima.auto/wenjie/))([example.unknownsuffix](https://www.example.unknownsuffix/path))\n了解[Node.js](https://nodejs.org)。"
+        self.assertEqual(await filtered(list(text)), "汽车比较。了解Node.js。")
+
     async def test_query_punctuation_does_not_release_url_fragments(self):
         chunks = ["参考资料：https://example.com/search?", "q=hello;", "page=2!", "#result。回答完了。"]
         self.assertEqual(await filtered(chunks), "参考资料：。回答完了。")

@@ -10,6 +10,7 @@ import re
 import time
 from pathlib import Path
 from typing import AsyncIterator
+from urllib.parse import urlsplit
 
 import miservice
 from aiohttp import ClientSession, ClientTimeout
@@ -40,7 +41,7 @@ _SPEECH_TLDS = (
     "io|ai|app|dev|me|ink|sh|co|uk|us|de|fr|jp|kr|hk|tw|sg|au|ca|"
     "ru|in|it|es|nl|ch|se|no|fi|dk|nz|za|br|mx|cc|tv|eu|ly|gg|to|"
     "info|biz|xyz|top|site|online|tech|cloud|shop|store|wiki|news|"
-    "link|live|club|vip|pro|name|museum|travel|mobi|asia|work|world|website"
+    "link|live|club|vip|pro|name|museum|travel|mobi|asia|work|world|website|auto"
 )
 _SPEECH_DOMAIN = rf"(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+(?:{_SPEECH_TLDS})(?![a-z0-9-])"
 _SPEECH_URL_CHAR = r"[^\s<>\[\]{}\"'，。！？；、（）()]"
@@ -73,7 +74,16 @@ def strip_speech_links(text: str) -> str:
                 depth -= 1
             end += 1
         label = match[1].strip()
-        if not match[0].startswith("!") and not _SPEECH_URL.search(label) and not label.isdigit():
+        destination = text[match.end():end - 1 if not depth else end].strip()
+        try:
+            host = (urlsplit(destination.strip("<>")).hostname or "").lower()
+        except ValueError:
+            host = ""
+        domain_label = label.lower().removeprefix("www.")
+        labels_host = bool(host) and "." in domain_label and (
+            host == domain_label or host.endswith("." + domain_label)
+        )
+        if not match[0].startswith("!") and not _SPEECH_URL.search(label) and not label.isdigit() and not labels_host:
             parts.append(label)
         start = end
     parts.append(text[start:])
@@ -530,8 +540,8 @@ class MiGPT:
                 self.log.debug("No new xiao ai record")
                 continue
 
-            # drop key words
-            query = re.sub(rf"^({'|'.join(self.config.keyword)})", "", query)
+            # Trigger phrases can carry the task itself (e.g. "请对比").
+            # They gate activation above, but must remain in the model query.
             # llama3 is not good at Chinese, so we need to add prompt in it.
             if self.config.bot == "llama":
                 query = f"你是一个基于 llama3 的智能助手，请你跟我对话时，一定使用中文，不要夹杂一些英文单词，甚至英语短语也不能随意使用，但类似于 llama3 这样的专属名词除外，问题是：{query}"

@@ -129,6 +129,48 @@ class QuestionPauseTests(unittest.IsolatedAsyncioTestCase):
                     await self.bot._get_last_query(self.response(record))
                 self.assertEqual(self.bot.last_record.get_nowait(), record)
 
+    async def test_trigger_phrases_keep_the_task_when_switching_topics(self):
+        self.bot.config.keyword = ["请问", "请对比", "请详细向我解释", "补充"]
+        self.bot.config.prompt = "test speech rules"
+        queries = [
+            "请问国家税务总局官网怎么找",
+            "请对比蜜雪冰城和茶白二",
+            "请对比特斯拉和华为汽车",
+            "请详细向我解释红外线遥控器的原理",
+            "补充，我更在乎价格",
+        ]
+        received = []
+        self.bot.chatbot = SimpleNamespace(
+            has_history=lambda: bool(received), name="ChatGPT"
+        )
+
+        async def poll():
+            for query in queries:
+                await self.bot.last_record.put(self.record(query))
+
+        async def answer(query):
+            received.append(query)
+            yield "test answer"
+
+        async def speak(stream):
+            async for _ in stream:
+                pass
+            if len(received) == len(queries):
+                raise asyncio.CancelledError
+
+        with (
+            patch.object(self.bot, "init_all_data", new_callable=AsyncMock),
+            patch.object(self.bot, "poll_latest_ask", side_effect=poll),
+            patch.object(self.bot, "do_tts", new_callable=AsyncMock),
+            patch.object(self.bot, "ask_gpt", side_effect=answer),
+            patch.object(self.bot, "speak", side_effect=speak),
+        ):
+            with self.assertRaises(asyncio.CancelledError):
+                await asyncio.wait_for(self.bot.run_forever(), 2)
+
+        self.assertEqual(received[0], queries[0] + ",test speech rules")
+        self.assertEqual(received[1:], queries[1:])
+
 
 if __name__ == "__main__":
     unittest.main()
