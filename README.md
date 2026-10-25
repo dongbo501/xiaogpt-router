@@ -2,6 +2,43 @@
 
 面向 OpenWrt / iStoreOS Docker 路由器的 XiaoGPT 部署版本，增加免费的 Edge 中文语音连续播报。
 
+## 一键安装
+
+**在路由器的 SSH 终端粘贴以下整段命令：下载完成后自动运行安装向导。**
+
+```sh
+XIAOGPT_INSTALLER="$(mktemp)" && \
+curl -fL --retry 3 https://raw.githubusercontent.com/dongbo501/xiaogpt-router/main/install.sh -o "$XIAOGPT_INSTALLER" && \
+sh "$XIAOGPT_INSTALLER" && rm -f "$XIAOGPT_INSTALLER"
+```
+
+需要 Linux、已安装并运行的 Docker，以及 `curl`；不需要 Git、Python 或 Docker Compose。镜像支持 x86_64 / ARM64，目前仅在 x86_64 路由器上完成音箱实测。
+
+<details>
+<summary>路由器只有 wget？使用这条命令</summary>
+
+```sh
+XIAOGPT_INSTALLER="$(mktemp)" && \
+wget -O "$XIAOGPT_INSTALLER" https://raw.githubusercontent.com/dongbo501/xiaogpt-router/main/install.sh && \
+sh "$XIAOGPT_INSTALLER" && rm -f "$XIAOGPT_INSTALLER"
+```
+
+</details>
+
+向导会让你选择**持久安装目录**（建议外接硬盘），下载源码、构建镜像，然后引导填写路由器地址、小米账号、API 地址、Key 和模型名，完成验证码登录并选择音箱。密码和 Key 不回显；最后自动后台启动并检查服务就绪。默认音色为 Edge 晓晓，触发词包括“请问”和“补充”。
+
+检测到已有 `xiaogpt` 容器时会停止安装，不替换旧服务。构建或配置失败后可重新运行命令、选择原目录继续；已有配置不会被覆盖。若容器已创建但启动失败，请先查看 `docker logs --tail 100 xiaogpt`。
+
+一键安装的配置位于 `<安装目录>/config/config.json`，音频服务地址位于 `<安装目录>/config/router.env`。修改普通配置后执行 `docker restart xiaogpt`。`router.env` 在创建容器时加载，修改网络地址需要重新创建容器。常用管理命令：
+
+```sh
+docker logs -f xiaogpt       # 查看日志
+docker restart xiaogpt       # 重启服务
+docker stop xiaogpt          # 停止服务
+```
+
+安装脚本：[install.sh](install.sh) · 配置向导：[setup.py](deploy/router/setup.py)。安装过程需要访问 GitHub、Docker Hub 和 PyPI，小米登录及 Edge 语音也需要联网。
+
 基于 [yihong0618/xiaogpt](https://github.com/yihong0618/xiaogpt)，源码基线为 [`4258b0b53cf6af062f1a01af993d47a161382a0f`](https://github.com/yihong0618/xiaogpt/commit/4258b0b53cf6af062f1a01af993d47a161382a0f)。保留上游 MIT 许可证；原始说明见 [README.upstream.md](README.upstream.md)。
 
 ## 本版本的改动
@@ -17,7 +54,7 @@
 
 默认使用“晓晓”中文女声、流式回答、Edge 语音音量 `+40%`。本版本不修改音箱自身音量。Edge 需要联网；聊天模型仍使用用户自己的 API，费用取决于聊天服务商。
 
-## Docker 部署
+## 手动 Docker Compose 部署
 
 请使用 `deploy/router/Dockerfile`。根目录 Dockerfile 和 PDM 锁文件保留上游版本，不包含本部署层的 Edge 升级。
 
@@ -55,9 +92,9 @@ docker compose --env-file deploy/router/router.env -f deploy/router/compose.yaml
 
 ```sh
 docker run --rm --network none \
-  -v "$PWD/tests:/tests:ro" \
+  -v "$PWD:/repo:ro" -w /repo \
   --entrypoint /app/.venv/bin/python xiaogpt-router:local \
-  -m unittest discover -s /tests -v
+  -m unittest discover -s tests -v
 ```
 
 GitHub Actions 仅提供手动检查，不自动发布 Docker Hub 镜像或 PyPI 包。

@@ -136,6 +136,7 @@ config/
 .pdm-python
 .pdm-build/
 *.sh
+!/install.sh
 nohup.out
 xiao_config.yaml
 .DS_Store
@@ -148,3 +149,7 @@ xiao_config.yaml
 !.env.example
 *.pem
 *.key
+.xiaogpt-router-install
+.source-ready
+.source.tar.gz
+.install-lock/

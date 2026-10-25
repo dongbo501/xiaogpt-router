@@ -10,3 +10,7 @@ config
 **/*.log
 **/*.mp3
 .venv
+.xiaogpt-router-install
+.source-ready
+.source.tar.gz
+.install-lock

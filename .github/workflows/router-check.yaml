@@ -13,6 +13,6 @@ jobs:
       - name: Run offline checks
         run: |
           docker run --rm --network none \
-            -v "$PWD/tests:/tests:ro" \
+            -v "$PWD:/repo:ro" -w /repo \
             --entrypoint /app/.venv/bin/python xiaogpt-router:local \
-            -m unittest discover -s /tests -v
+            -m unittest discover -s tests -v
