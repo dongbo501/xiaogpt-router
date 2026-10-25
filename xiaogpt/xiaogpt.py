@@ -307,6 +307,11 @@ class MiGPT:
     def chatbot(self):
         return get_bot(self.config)
 
+    def _reset_chatbot(self):
+        # A fresh instance also isolates late results from interrupted requests.
+        # Recreate lazily so each backend starts with its own empty history.
+        self.__dict__.pop("chatbot", None)
+
     async def simulate_xiaoai_question(self):
         data = MI_ASK_SIMULATE_DATA
         # Convert the data['data'] value from a string to a dictionary
@@ -520,6 +525,7 @@ class MiGPT:
             if query == self.config.start_conversation:
                 if not self.in_conversation:
                     print("开始对话")
+                    self._reset_chatbot()
                     self.in_conversation = True
                     await self.wakeup_xiaoai()
                 await self.stop_if_xiaoai_is_playing()
@@ -528,6 +534,7 @@ class MiGPT:
                 if self.in_conversation:
                     print("结束对话")
                     self.in_conversation = False
+                    self._reset_chatbot()
                 await self.stop_if_xiaoai_is_playing()
                 continue
 
@@ -539,6 +546,9 @@ class MiGPT:
             if not self.need_ask_gpt(new_record):
                 self.log.debug("No new xiao ai record")
                 continue
+
+            if not self.in_conversation:
+                self._reset_chatbot()
 
             # Trigger phrases can carry the task itself (e.g. "请对比").
             # They gate activation above, but must remain in the model query.

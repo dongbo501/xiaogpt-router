@@ -168,8 +168,7 @@ class QuestionPauseTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(asyncio.CancelledError):
                 await asyncio.wait_for(self.bot.run_forever(), 2)
 
-        self.assertEqual(received[0], queries[0] + ",test speech rules")
-        self.assertEqual(received[1:], queries[1:])
+        self.assertEqual(received, [q + ",test speech rules" for q in queries])
 
 
 if __name__ == "__main__":
