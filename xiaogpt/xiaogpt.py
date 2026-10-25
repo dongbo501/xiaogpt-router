@@ -103,12 +103,6 @@ class MiGPT:
                         new_record,
                     )
                 await self.polling_event.wait()
-                if (
-                    self.config.mute_xiaoai
-                    and new_record
-                    and self.need_ask_gpt(new_record)
-                ):
-                    await self.stop_if_xiaoai_is_playing()
                 if (d := time.perf_counter() - start) < 1:
                     # sleep to avoid too many request
                     if log_polling:
@@ -263,7 +257,7 @@ class MiGPT:
                     print("Maybe outof date trying to re init it")
                     await self._retry()
             else:
-                return self._get_last_query(data)
+                return await self._get_last_query(data)
         return None
 
     async def _retry(self):
@@ -271,14 +265,25 @@ class MiGPT:
         # accepts, so renew it with passToken instead of reusing it
         await self.init_all_data(refresh_token=True)
 
-    def _get_last_query(self, data: dict) -> dict | None:
+    async def _get_last_query(self, data: dict) -> dict | None:
         if d := data.get("data"):
             records = json.loads(d).get("records")
             if not records:
                 return None
             last_record = records[0]
             timestamp = last_record.get("time")
-            if timestamp > self.last_timestamp:
+            if timestamp > self.last_timestamp and not self.last_record.full():
+                if self.config.mute_xiaoai and self.need_ask_gpt(last_record):
+                    # Pause before publishing the record, so a delayed command
+                    # cannot interrupt the waiting prompt or the GPT answer.
+                    try:
+                        paused = await self.mina_service.player_pause(self.device_id)
+                        if paused is False:
+                            self.log.warning("Xiaoai did not accept the pause command")
+                    except Exception:
+                        self.log.warning(
+                            "Could not pause xiaoai; continuing with the question"
+                        )
                 try:
                     self.last_record.put_nowait(last_record)
                     self.last_timestamp = timestamp
@@ -433,9 +438,7 @@ class MiGPT:
                 query = f"{query},{self.config.prompt}"
             # some model can not detect the language code, so we need to add it
 
-            if self.config.mute_xiaoai:
-                await self.stop_if_xiaoai_is_playing()
-            else:
+            if not self.config.mute_xiaoai:
                 # waiting for xiaoai speaker done
                 await asyncio.sleep(8)
             await self.do_tts(f"正在问{self.chatbot.name}请耐心等待")
