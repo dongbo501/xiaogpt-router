@@ -140,6 +140,7 @@ class QuestionPauseTests(unittest.IsolatedAsyncioTestCase):
             "补充，我更在乎价格",
         ]
         received = []
+        processed = asyncio.Event()
         self.bot.chatbot = SimpleNamespace(
             has_history=lambda: bool(received), name="ChatGPT"
         )
@@ -147,6 +148,8 @@ class QuestionPauseTests(unittest.IsolatedAsyncioTestCase):
         async def poll():
             for query in queries:
                 await self.bot.last_record.put(self.record(query))
+                await processed.wait()
+                processed.clear()
 
         async def answer(query):
             received.append(query)
@@ -155,6 +158,7 @@ class QuestionPauseTests(unittest.IsolatedAsyncioTestCase):
         async def speak(stream):
             async for _ in stream:
                 pass
+            processed.set()
             if len(received) == len(queries):
                 raise asyncio.CancelledError
 

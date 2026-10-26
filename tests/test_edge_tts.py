@@ -103,6 +103,102 @@ class SynthesisTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.wait_for(self.tts.synthesize('zh', source()), timeout=2)
         self.mina.play_by_url.assert_not_awaited()
 
+    async def test_cancel_stops_playback_and_closes_voice_and_text_producers(self):
+        playing, text_closed, voice_closed = (asyncio.Event() for _ in range(3))
+
+        class Voice:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def stream(self):
+                try:
+                    yield {'type': 'audio', 'data': b'a' * 6000}
+                    await asyncio.Future()
+                finally:
+                    voice_closed.set()
+
+        async def source():
+            try:
+                yield '这是一段尚未说完的回答。'
+                await asyncio.Future()
+            finally:
+                text_closed.set()
+
+        async def play(device, url, **kwargs):
+            playing.set()
+            return True
+
+        self.mina.play_by_url.side_effect = play
+        with patch('edge_tts.Communicate', Voice):
+            task = asyncio.create_task(self.tts.synthesize('zh', source()))
+            try:
+                await asyncio.wait_for(playing.wait(), 2)
+                state = self.tts.current
+                task.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await asyncio.wait_for(task, 2)
+                self.assertTrue(state.closed)
+                self.assertTrue(text_closed.is_set())
+                self.assertTrue(voice_closed.is_set())
+                self.assertIsNone(self.tts.current)
+                self.mina.player_stop.assert_awaited_once_with('device')
+            finally:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+
+    async def test_cancel_waits_for_pending_play_command_before_stopping(self):
+        starting, accept_play = asyncio.Event(), asyncio.Event()
+        events = []
+
+        async def produce(text_stream, state):
+            state.append(b'a' * 6000)
+            await asyncio.Future()
+
+        async def source():
+            yield 'test'
+
+        async def play(device, url, **kwargs):
+            events.append('play-start')
+            starting.set()
+            await accept_play.wait()
+            events.append('play-accepted')
+            return True
+
+        async def stop(device):
+            events.append('stop')
+            return True
+
+        self.mina.play_by_url.side_effect = play
+        self.mina.player_stop.side_effect = stop
+        with patch.object(self.tts, '_produce', side_effect=produce):
+            task = asyncio.create_task(self.tts.synthesize('zh', source()))
+            try:
+                await asyncio.wait_for(starting.wait(), 2)
+                state = self.tts.current
+                task.cancel()
+                for _ in range(10):
+                    await asyncio.sleep(0)
+                self.assertTrue(state.closed)
+                self.assertFalse(task.done())
+                self.mina.player_stop.assert_not_awaited()
+                url = f'http://127.0.0.1:{self.tts.httpd.server_port}{self.tts.path}'
+
+                def retry():
+                    with self.assertRaises(urllib.error.HTTPError) as caught:
+                        urllib.request.urlopen(url, timeout=2)
+                    self.assertEqual(caught.exception.code, 410)
+                    caught.exception.close()
+
+                await asyncio.to_thread(retry)
+                accept_play.set()
+                with self.assertRaises(asyncio.CancelledError):
+                    await asyncio.wait_for(task, 2)
+                self.assertEqual(events, ['play-start', 'play-accepted', 'stop'])
+                self.assertIsNone(self.tts.current)
+            finally:
+                accept_play.set()
+                await asyncio.gather(task, return_exceptions=True)
+
 
 
 

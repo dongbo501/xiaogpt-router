@@ -232,7 +232,7 @@ class EdgeLiveTTS(TTS):
         self.path = '/' + uuid.uuid4().hex + '.mp3'
         worker = asyncio.create_task(self._produce(text_stream, state))
         started = time.monotonic()
-        playing = False
+        play_request = None
         try:
             async with asyncio.timeout(90):
                 while not state.audio and not worker.done():
@@ -242,7 +242,12 @@ class EdgeLiveTTS(TTS):
             if not state.audio:
                 return
             url = f'http://{self.hostname}:{self.httpd.server_port}{self.path}'
-            playing = await self.mina_service.play_by_url(self.device_id, url, _type=1)
+            play_request = asyncio.create_task(
+                self.mina_service.play_by_url(self.device_id, url, _type=1)
+            )
+            # A canceled HTTP await does not retract a command already sent to
+            # Xiaomi. Let it settle before stopping this track in cleanup.
+            playing = await asyncio.shield(play_request)
             if not playing:
                 raise RuntimeError('Speaker rejected Edge audio URL')
             logger.info('Edge playback accepted after %.2f seconds', time.monotonic() - started)
@@ -264,7 +269,9 @@ class EdgeLiveTTS(TTS):
             state.close()
             worker.cancel()
             await asyncio.gather(worker, return_exceptions=True)
-            if playing:
+            if play_request is not None:
+                with contextlib.suppress(Exception):
+                    await play_request
                 with contextlib.suppress(Exception):
                     await self.mina_service.player_stop(self.device_id)
             self.current = None

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import functools
 import json
 import logging
@@ -187,7 +188,6 @@ class MiGPT:
         self.mina_service = None
         self.miio_service = None
         self.in_conversation = False
-        self.polling_event = asyncio.Event()
         self.last_record = asyncio.Queue(1)
         # setup logger
         self.log = logging.getLogger("xiaogpt")
@@ -208,23 +208,10 @@ class MiGPT:
                     self.log.debug(
                         "Listening new message, timestamp: %s", self.last_timestamp
                     )
-                new_record = await self.get_latest_ask_from_xiaoai(session)
-                start = time.perf_counter()
-                if log_polling:
-                    self.log.debug(
-                        "Polling_event, timestamp: %s %s",
-                        self.last_timestamp,
-                        new_record,
-                    )
-                await self.polling_event.wait()
-                if (d := time.perf_counter() - start) < 1:
-                    # sleep to avoid too many request
-                    if log_polling:
-                        self.log.debug(
-                            "Sleep %f, timestamp: %s", d, self.last_timestamp
-                        )
-                    # if you want force mute xiaoai, comment this line below.
-                    await asyncio.sleep(1 - d)
+                await self.get_latest_ask_from_xiaoai(session)
+                # Keep listening through generation AND playback, at the same
+                # one-second minimum interval between cloud requests.
+                await asyncio.sleep(1)
 
     async def init_all_data(self, refresh_token: bool = False):
         await self.login_miboy(refresh_token)
@@ -459,37 +446,83 @@ class MiGPT:
             yield message
             return
 
-        async def collect_stream(queue):
-            async for message in self.chatbot.ask_stream(
-                query, **self.config.gpt_options
-            ):
-                await queue.put(message)
-
-        def done_callback(future):
-            queue.put_nowait(EOF)
-            if future.exception():
-                self.log.error(future.exception())
-
-        self.polling_event.set()
         queue = asyncio.Queue()
-        is_eof = False
-        task = asyncio.create_task(collect_stream(queue))
-        task.add_done_callback(done_callback)
-        while True:
-            if is_eof or not self.last_record.empty():
-                break
-            message = await queue.get()
-            if message is EOF:
-                break
-            while not queue.empty():
-                if (next_msg := queue.get_nowait()) is EOF:
-                    is_eof = True
+        chatbot = self.chatbot
+
+        async def collect_stream():
+            try:
+                async with contextlib.aclosing(
+                    chatbot.ask_stream(query, **self.config.gpt_options)
+                ) as stream:
+                    async for message in stream:
+                        await queue.put(message)
+            finally:
+                queue.put_nowait(EOF)
+
+        task = asyncio.create_task(collect_stream())
+        try:
+            is_eof = False
+            while not is_eof:
+                message = await queue.get()
+                if message is EOF:
                     break
-                message += next_msg
-            if message:
-                yield message
-        self.polling_event.clear()
-        task.cancel()
+                while not queue.empty():
+                    if (next_msg := queue.get_nowait()) is EOF:
+                        is_eof = True
+                        break
+                    message += next_msg
+                if message:
+                    yield message
+            await task
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    async def _speak_until_interrupted(self, query: str) -> dict | None:
+        async def answer():
+            async with contextlib.aclosing(self.ask_gpt(query)) as stream:
+                await self.speak(stream)
+
+        answer_task = asyncio.create_task(answer())
+        record_task = asyncio.create_task(self.last_record.get())
+        interrupted_at = None
+        try:
+            while True:
+                await asyncio.wait(
+                    (answer_task, record_task), return_when=asyncio.FIRST_COMPLETED
+                )
+                # Prefer an arrived question even if playback ended in the same
+                # event-loop turn, so it cannot be consumed and lost in cleanup.
+                if record_task.done():
+                    record = record_task.result()
+                    text = record.get("query", "").strip()
+                    if (
+                        self.need_ask_gpt(record)
+                        or self.need_change_prompt(record)
+                        or text in (
+                            self.config.start_conversation,
+                            self.config.end_conversation,
+                        )
+                    ):
+                        interrupted_at = time.monotonic()
+                        self.log.info("New request received; closing previous answer")
+                        return record
+                    # Native Xiaoai commands do not become GPT questions.
+                    record_task = asyncio.create_task(self.last_record.get())
+                if answer_task.done():
+                    await answer_task
+                    return None
+        finally:
+            record_task.cancel()
+            answer_task.cancel()
+            # TTS must close its URL and finish stopping the old track before
+            # the next waiting prompt or playback command can be sent.
+            await asyncio.gather(record_task, answer_task, return_exceptions=True)
+            if interrupted_at is not None:
+                self.log.info(
+                    "Previous answer closed in %.2f seconds",
+                    time.monotonic() - interrupted_at,
+                )
 
     async def get_if_xiaoai_is_playing(self):
         playing_info = await self.mina_service.player_get_status(self.device_id)
@@ -512,15 +545,21 @@ class MiGPT:
     async def run_forever(self):
         await self.init_all_data()
         task = asyncio.create_task(self.poll_latest_ask())
-        assert task is not None  # to keep the reference to task, do not remove this
+        try:
+            await self._run_conversation_loop()
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    async def _run_conversation_loop(self):
         print(
             f"Running xiaogpt now, 用 [green]{'/'.join(self.config.keyword)}[/] 开头来提问"
         )
         print(f"或用 [green]{self.config.start_conversation}[/] 开始持续对话")
+        pending_record = None
         while True:
-            self.polling_event.set()
-            new_record = await self.last_record.get()
-            self.polling_event.clear()  # stop polling when processing the question
+            new_record = pending_record or await self.last_record.get()
+            pending_record = None
             query = new_record.get("query", "").strip()
             if query == self.config.start_conversation:
                 if not self.in_conversation:
@@ -575,12 +614,13 @@ class MiGPT:
                 print("小爱没回")
             print(f"以下是 {self.chatbot.name} 的回答：", end="")
             try:
-                await self.speak(self.ask_gpt(query))
+                pending_record = await self._speak_until_interrupted(query)
             except Exception as e:
                 print(f"{self.chatbot.name} 回答出错 {str(e)}")
             else:
-                print("回答完毕")
-            if self.in_conversation:
+                if pending_record is None:
+                    print("回答完毕")
+            if self.in_conversation and pending_record is None:
                 print(f"继续对话，或用 `{self.config.end_conversation}` 结束对话")
                 await self.wakeup_xiaoai()
 
