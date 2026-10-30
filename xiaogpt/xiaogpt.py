@@ -416,14 +416,38 @@ class MiGPT:
             await self.do_tts(f"正在问{self.chatbot.name}请耐心等待")
             return
 
-        # Finish the prompt before the answer reuses the audio player.
-        # Bound this optional playback so a TTS outage cannot block GPT.
+        await self._play_cached_prompt("正在问 GPT，请耐心等待")
+        self.log.info("Waiting prompt completed from cached Edge audio")
+
+    async def _play_cached_prompt(self, text: str):
+        # All fixed Edge prompts share a persistent, text-keyed audio cache.
+        # Bound optional playback so a TTS outage cannot block conversation.
         async with asyncio.timeout(20):
             prompt = await self.tts.cache_prompt(
-                "正在问 GPT，请耐心等待", self.mi_token_home.parent / "audio-cache"
+                text, self.mi_token_home.parent / "audio-cache"
             )
             await self.tts.play_file(prompt)
-        self.log.info("Waiting prompt completed from cached Edge audio")
+
+    async def _play_answer_error(self, error: Exception):
+        detail = str(error).lower()
+        code = str(getattr(error, "code", "")).lower()
+        if code == "insufficient_quota" or "insufficient_quota" in detail:
+            text = "GPT 服务额度不足，请检查接口账户。"
+        elif (
+            getattr(error, "status_code", None) == 429
+            or "rate_limit" in code
+            or "rate limit" in detail
+            or "tokens per minute" in detail
+        ):
+            text = "GPT 服务暂时限流，请稍后再试。"
+        else:
+            text = "GPT 暂时无法回答，请稍后再试。"
+        if self.config.tts == "edge":
+            await self._play_cached_prompt(text)
+        else:
+            async with asyncio.timeout(20):
+                await self.do_tts(text)
+        self.log.info("Answer failure notification completed")
 
     @functools.cached_property
     def tts(self) -> TTS:
@@ -542,11 +566,23 @@ class MiGPT:
         self, query: str, *, with_prompt: bool = False
     ) -> dict | None:
         async def answer():
-            if with_prompt:
-                await self._answer_with_waiting_prompt(query)
-                return
-            async with contextlib.aclosing(self.ask_gpt(query)) as stream:
-                await self.speak(stream)
+            try:
+                if with_prompt:
+                    await self._answer_with_waiting_prompt(query)
+                    return
+                async with contextlib.aclosing(self.ask_gpt(query)) as stream:
+                    await self.speak(stream)
+            except Exception as error:
+                # Keep notifications inside the interruptible answer task.
+                # A new question must also cancel stale error audio.
+                try:
+                    await self._play_answer_error(error)
+                except Exception as prompt_error:
+                    self.log.warning(
+                        "Could not play answer failure notification (%s)",
+                        type(prompt_error).__name__,
+                    )
+                raise
 
         answer_task = asyncio.create_task(answer())
         record_task = asyncio.create_task(self.last_record.get())

@@ -57,13 +57,11 @@ class ChatGPTBot(ChatHistoryMixin, BaseBot):
             httpx_kwargs["proxy"] = self.proxy
         async with httpx.AsyncClient(trust_env=True, **httpx_kwargs) as sess:
             client = self._make_openai_client(sess)
-            try:
-                completion = await client.chat.completions.create(messages=ms, **kwargs)
-            except Exception as e:
-                print(str(e))
-                return ""
+            completion = await client.chat.completions.create(messages=ms, **kwargs)
 
             message = completion.choices[0].message.content
+            if not message or not message.strip():
+                raise RuntimeError("GPT returned an empty answer")
             self.add_message(query, message)
             print(message)
             return message
@@ -77,13 +75,9 @@ class ChatGPTBot(ChatHistoryMixin, BaseBot):
             httpx_kwargs["proxy"] = self.proxy
         async with httpx.AsyncClient(trust_env=True, **httpx_kwargs) as sess:
             client = self._make_openai_client(sess)
-            try:
-                completion = await client.chat.completions.create(
-                    messages=ms, stream=True, **kwargs
-                )
-            except Exception as e:
-                print(str(e))
-                return
+            completion = await client.chat.completions.create(
+                messages=ms, stream=True, **kwargs
+            )
 
             async def text_gen():
                 async for event in completion:
@@ -102,4 +96,7 @@ class ChatGPTBot(ChatHistoryMixin, BaseBot):
                     yield sentence
             finally:
                 print()
-                self.add_message(query, message)
+            if not message.strip():
+                raise RuntimeError("GPT returned an empty answer")
+            # Failed or cancelled streams must not become successful history.
+            self.add_message(query, message)
