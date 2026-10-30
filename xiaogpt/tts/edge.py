@@ -3,13 +3,16 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import io
+import json
 import os
 import re
 import threading
 import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 from mutagen.mp3 import MP3
 
@@ -226,11 +229,80 @@ class EdgeLiveTTS(TTS):
             collector.cancel()
             await asyncio.gather(collector, return_exceptions=True)
 
+    @staticmethod
+    def _read_mp3(path):
+        path = Path(path)
+        if path.stat().st_size > 16 * 1024 * 1024:
+            raise ValueError('Cached audio exceeds the 16 MiB limit')
+        audio = path.read_bytes()
+        duration = MP3(io.BytesIO(audio)).info.length
+        if not audio or duration <= 0:
+            raise ValueError('Cached audio is empty or invalid')
+        return audio, duration
+
+    async def cache_prompt(self, text, directory):
+        settings = {
+            'text': text,
+            'voice': self.voice,
+            'options': {k: v for k, v in self.options.items() if k != 'proxy'},
+        }
+        key = hashlib.sha256(json.dumps(settings, sort_keys=True).encode()).hexdigest()[:24]
+        path = Path(directory) / f'waiting-prompt-{key}.mp3'
+        try:
+            await asyncio.to_thread(self._read_mp3, path)
+        except FileNotFoundError:
+            pass
+        except Exception:
+            logger.warning('Invalid cached waiting prompt; regenerating audio')
+        else:
+            logger.info('Edge waiting prompt cache hit: %s', path.name)
+            return path
+
+        async def source():
+            yield text
+
+        state = AudioStream()
+        await self._produce(source(), state)
+        if not state.audio or state.duration <= 0:
+            raise RuntimeError('Edge generated no waiting-prompt audio')
+        audio = bytes(state.audio)
+
+        def save():
+            path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            temporary = path.with_name(path.name + '.' + uuid.uuid4().hex + '.tmp')
+            try:
+                with temporary.open('xb') as file:
+                    file.write(audio)
+                    file.flush()
+                    os.fsync(file.fileno())
+                temporary.chmod(0o600)
+                os.replace(temporary, path)
+            finally:
+                with contextlib.suppress(FileNotFoundError):
+                    temporary.unlink()
+
+        await asyncio.to_thread(save)
+        logger.info('Edge waiting prompt cached: %.2f seconds, %s', state.duration, path)
+        return path
+
+    async def play_file(self, path):
+        audio, duration = await asyncio.to_thread(self._read_mp3, path)
+        state = AudioStream()
+        state.append(audio)
+        state.duration = duration
+        state.finish()
+        ready = asyncio.get_running_loop().create_future()
+        ready.set_result(None)
+        await self._play(state, ready)
+
     async def synthesize(self, lang, text_stream):
         state = AudioStream()
+        worker = asyncio.create_task(self._produce(text_stream, state))
+        await self._play(state, worker)
+
+    async def _play(self, state, worker):
         self.current = state
         self.path = '/' + uuid.uuid4().hex + '.mp3'
-        worker = asyncio.create_task(self._produce(text_stream, state))
         started = time.monotonic()
         play_request = None
         try:

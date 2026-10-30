@@ -1,9 +1,6 @@
 services:
   xiaogpt:
-    build:
-      context: ../..
-      dockerfile: deploy/router/Dockerfile
-    image: xiaogpt-router:local
+    image: ${XIAOGPT_IMAGE:-ghcr.io/dongbo501/xiaogpt-router:latest}
     container_name: xiaogpt
     network_mode: host
     restart: unless-stopped

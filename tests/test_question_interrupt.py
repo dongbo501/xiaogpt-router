@@ -130,6 +130,67 @@ class InterruptionTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await asyncio.wait_for(task, 1), new)
             self.assertTrue(closed.is_set())
 
+    async def test_new_question_cancels_prompt_and_prefetched_model_together(self):
+        prompt_started, model_started, prompt_closed, model_closed = (
+            asyncio.Event() for _ in range(4)
+        )
+
+        async def prompt():
+            prompt_started.set()
+            try:
+                await asyncio.Future()
+            finally:
+                prompt_closed.set()
+
+        async def model(query):
+            model_started.set()
+            try:
+                await asyncio.Future()
+                yield "unreachable"
+            finally:
+                model_closed.set()
+
+        with (
+            patch.object(self.bot, "_play_waiting_prompt", side_effect=prompt),
+            patch.object(self.bot, "ask_gpt", side_effect=model),
+            patch.object(self.bot, "speak", new_callable=AsyncMock) as speak,
+        ):
+            task = self.start(self.bot._speak_until_interrupted("old", with_prompt=True))
+            await asyncio.wait_for(prompt_started.wait(), 1)
+            await asyncio.wait_for(model_started.wait(), 1)
+            new = await self.publish("请问第二题")
+            self.assertEqual(await asyncio.wait_for(task, 1), new)
+            self.assertTrue(prompt_closed.is_set())
+            self.assertTrue(model_closed.is_set())
+            speak.assert_not_awaited()
+
+    async def test_prefetch_error_propagates_after_prompt_without_hanging(self):
+        prompt_started, finish_prompt = asyncio.Event(), asyncio.Event()
+
+        async def prompt():
+            prompt_started.set()
+            await finish_prompt.wait()
+
+        async def model(query):
+            raise RuntimeError("model request failed")
+            yield "unreachable"
+
+        async def speak(stream):
+            async for _ in stream:
+                pass
+
+        with (
+            patch.object(self.bot, "_play_waiting_prompt", side_effect=prompt),
+            patch.object(self.bot, "ask_gpt", side_effect=model),
+            patch.object(self.bot, "speak", side_effect=speak),
+        ):
+            task = self.start(self.bot._speak_until_interrupted("old", with_prompt=True))
+            await asyncio.wait_for(prompt_started.wait(), 1)
+            self.assertFalse(task.done())
+            finish_prompt.set()
+            with self.assertRaisesRegex(RuntimeError, "model request failed"):
+                await asyncio.wait_for(task, 1)
+
     async def test_interruption_closes_model_when_text_consumer_is_suspended(self):
         consumed, model_closed = asyncio.Event(), asyncio.Event()
 

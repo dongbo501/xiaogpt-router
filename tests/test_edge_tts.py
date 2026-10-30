@@ -1,11 +1,13 @@
 """Check streaming delivery, retries, completion and error handling offline."""
 import asyncio
+import tempfile
 import threading
 import time
 import unittest
 import urllib.error
 import urllib.request
 from types import SimpleNamespace
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 from xiaogpt.tts.edge import AudioHandler, AudioStream, EdgeLiveTTS
@@ -94,6 +96,93 @@ class SynthesisTests(unittest.IsolatedAsyncioTestCase):
             self.tts.current.close()
         await asyncio.to_thread(self.tts.httpd.shutdown)
         self.tts.httpd.server_close()
+
+    async def test_prompt_cache_survives_a_new_tts_instance_without_edge_requests(self):
+        class Voice:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def stream(self):
+                yield {'type': 'audio', 'data': b'a' * 6000}
+
+        mp3 = SimpleNamespace(info=SimpleNamespace(length=1.0))
+        with tempfile.TemporaryDirectory() as directory, patch('xiaogpt.tts.edge.MP3', return_value=mp3):
+            with patch('edge_tts.Communicate', Voice):
+                first = await self.tts.cache_prompt('正在问 GPT，请耐心等待', directory)
+            self.assertEqual(first.read_bytes(), b'a' * 6000)
+            with patch.dict('os.environ', {'XIAOGPT_HOSTNAME': '127.0.0.1', 'XIAOGPT_PORT': '0'}):
+                restarted = EdgeLiveTTS(self.mina, 'device', SimpleNamespace(tts_options={}))
+            try:
+                with patch('edge_tts.Communicate', side_effect=AssertionError('cache hit must stay offline')) as edge:
+                    second = await restarted.cache_prompt('正在问 GPT，请耐心等待', directory)
+                self.assertEqual(second, first)
+                edge.assert_not_called()
+            finally:
+                await asyncio.to_thread(restarted.httpd.shutdown)
+                restarted.httpd.server_close()
+
+    async def test_changed_voice_settings_generate_a_separate_prompt_cache(self):
+        async def produce(stream, state):
+            async for _ in stream:
+                pass
+            state.append(b'a' * 6000)
+            state.duration = 1.0
+            state.finish()
+
+        mp3 = SimpleNamespace(info=SimpleNamespace(length=1.0))
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch('xiaogpt.tts.edge.MP3', return_value=mp3),
+            patch.object(self.tts, '_produce', side_effect=produce) as generate,
+        ):
+            first = await self.tts.cache_prompt('prompt', directory)
+            self.tts.options['volume'] = '+40%'
+            changed = await self.tts.cache_prompt('prompt', directory)
+            again = await self.tts.cache_prompt('prompt', directory)
+            self.assertNotEqual(changed, first)
+            self.assertEqual(again, changed)
+            self.assertEqual(generate.await_count, 2)
+
+    async def test_failed_cache_generation_leaves_no_partial_audio(self):
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.object(self.tts, '_produce', side_effect=RuntimeError('speech service down')),
+        ):
+            with self.assertRaisesRegex(RuntimeError, 'speech service down'):
+                await self.tts.cache_prompt('prompt', directory)
+            self.assertEqual(list(Path(directory).iterdir()), [])
+
+    async def test_cached_file_can_play_twice_without_edge_synthesis(self):
+        received, urls = [], []
+
+        async def play(device, url, **kwargs):
+            urls.append(url)
+
+            def receive():
+                with urllib.request.urlopen(url, timeout=2) as response:
+                    return response.read()
+
+            received.append(await asyncio.to_thread(receive))
+            self.tts.current.playback_end = time.monotonic() - 1
+            self.tts.current.ended.set()
+            return True
+
+        self.mina.play_by_url.side_effect = play
+        mp3 = SimpleNamespace(info=SimpleNamespace(length=1.0))
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch('xiaogpt.tts.edge.MP3', return_value=mp3),
+            patch('edge_tts.Communicate', side_effect=AssertionError('cached playback must stay offline')) as edge,
+        ):
+            path = Path(directory) / 'prompt.mp3'
+            path.write_bytes(b'a' * 6000)
+            for _ in range(2):
+                await asyncio.wait_for(self.tts.play_file(path), 2)
+                self.assertIsNone(self.tts.current)
+            edge.assert_not_called()
+        self.assertEqual(received, [b'a' * 6000, b'a' * 6000])
+        self.assertEqual(len(set(urls)), 2)
+        self.assertEqual(self.mina.player_stop.await_count, 2)
 
     async def test_text_source_error_does_not_hang(self):
         async def source():

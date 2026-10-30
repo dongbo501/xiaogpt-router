@@ -4,7 +4,8 @@ set -eu
 umask 077
 
 SOURCE_URL=https://codeload.github.com/dongbo501/xiaogpt-router/tar.gz/refs/heads/main
-IMAGE=xiaogpt-router:local
+IMAGE=${XIAOGPT_IMAGE:-ghcr.io/dongbo501/xiaogpt-router:latest}
+BUILD_IMAGE=0
 INSTALL_DIR=
 LOCK_DIR=
 ARCHIVE=
@@ -25,8 +26,13 @@ while [ "$#" -gt 0 ]; do
             INSTALL_DIR=$2
             shift 2
             ;;
+        --build)
+            BUILD_IMAGE=1
+            IMAGE=${XIAOGPT_IMAGE:-xiaogpt-router:local}
+            shift
+            ;;
         -h|--help)
-            printf '用法：sh install.sh [--dir /持久磁盘/xiaogpt-router]\n需要 Linux、已运行的 Docker、curl 或 wget，以及交互终端。\n'
+            printf '用法：sh install.sh [--dir /持久磁盘/xiaogpt-router] [--build]\n默认拉取发布镜像；--build 从源码本地构建。\n需要 Linux、已运行的 Docker、curl 或 wget，以及交互终端。\n'
             exit 0
             ;;
         *) fail "未知参数：$1" ;;
@@ -99,8 +105,13 @@ fi
 
 mkdir -p "$INSTALL_DIR/config"
 chmod 700 "$INSTALL_DIR/config"
-printf '\n构建 Docker 镜像，首次运行需要下载依赖，请耐心等待……\n'
-docker build -f "$INSTALL_DIR/deploy/router/Dockerfile" -t "$IMAGE" "$INSTALL_DIR"
+if [ "$BUILD_IMAGE" = 1 ]; then
+    printf '\n从源码构建 Docker 镜像……\n'
+    docker build -f "$INSTALL_DIR/deploy/router/Dockerfile" -t "$IMAGE" "$INSTALL_DIR"
+else
+    printf '\n拉取发布镜像 %s……\n' "$IMAGE"
+    docker pull "$IMAGE" || fail '拉取镜像失败；请检查 GHCR 网络访问，或使用 --build 从源码构建'
+fi
 
 printf '\n填写配置并登录小米账号（密码和 API Key 不回显）……\n'
 docker run --rm -it --network host \

@@ -25,7 +25,7 @@ sh "$XIAOGPT_INSTALLER" && rm -f "$XIAOGPT_INSTALLER"
 
 </details>
 
-向导会让你选择**持久安装目录**（建议外接硬盘），下载源码、构建镜像，然后引导填写路由器地址、小米账号、API 地址、Key 和模型名，完成验证码登录并选择音箱。密码和 Key 不回显；最后自动后台启动并检查服务就绪。默认音色为 Edge 晓晓，触发词包括“请问”和“补充”。
+向导会让你选择**持久安装目录**（建议外接硬盘），下载配置向导、拉取 `ghcr.io/dongbo501/xiaogpt-router:latest` 镜像，然后引导填写路由器地址、小米账号、API 地址、Key 和模型名，完成验证码登录并选择音箱。密码和 Key 不回显；最后自动后台启动并检查服务就绪。默认音色为 Edge 晓晓，触发词包括“请问”和“补充”。需要本地源码构建时，可下载脚本后运行 `sh install.sh --build`。
 
 检测到已有 `xiaogpt` 容器时会停止安装，不替换旧服务。构建或配置失败后可重新运行命令、选择原目录继续；已有配置不会被覆盖。若容器已创建但启动失败，请先查看 `docker logs --tail 100 xiaogpt`。
 
@@ -37,7 +37,7 @@ docker restart xiaogpt       # 重启服务
 docker stop xiaogpt          # 停止服务
 ```
 
-安装脚本：[install.sh](install.sh) · 配置向导：[setup.py](deploy/router/setup.py)。安装过程需要访问 GitHub、Docker Hub 和 PyPI，小米登录及 Edge 语音也需要联网。
+安装脚本：[install.sh](install.sh) · 配置向导：[setup.py](deploy/router/setup.py)。默认安装需要访问 GitHub 和 GHCR；源码构建另外需要 Docker Hub 和 PyPI。小米登录及回答的 Edge 语音合成需要联网。
 
 基于 [yihong0618/xiaogpt](https://github.com/yihong0618/xiaogpt)，源码基线为 [`4258b0b53cf6af062f1a01af993d47a161382a0f`](https://github.com/yihong0618/xiaogpt/commit/4258b0b53cf6af062f1a01af993d47a161382a0f)。保留上游 MIT 许可证；原始说明见 [README.upstream.md](README.upstream.md)。
 
@@ -47,7 +47,9 @@ docker stop xiaogpt          # 停止服务
 - Edge 音频边生成边传给音箱，一次回答只启动一个播放 URL，提前合成后续文字。
 - 音频缓存支持多个请求独立读取及 Range 重试，并处理播放结束后的重复请求。
 - 语音合成前过滤网址、常见域名和链接引用，保留可读的网站名称；支持链接跨流式片段返回，按句处理，无需等待整段回答结束。
-- 开启 `mute_xiaoai` 时，发现有效提问就直接暂停小爱，不再先查询播放状态；保留“正在问……”提示和原有约一秒的轮询等待。
+- 开启 `mute_xiaoai` 时，发现有效提问就直接暂停小爱，不再先查询播放状态；保留原有约一秒的轮询等待。
+- Edge 模式直接播放固定提示“正在问 GPT，请耐心等待”，MP3 持久化保存在 `/config/audio-cache`，同样的文本和音色不会重复合成，也不调用小米文字播报接口。
+- 等待提示播放与 GPT 请求并发进行，提前返回的文字先缓冲，提示完整播放后才播回答，避免声音重叠。提示失败或超时只记录警告，继续问答，不再退出整个服务。
 - 将触发词连同提问完整传给模型，保留“请对比”“请详细向我解释”等词表达的任务意图。
 - 普通模式每次只发送当前提问和配置提示词，减少历史消息的输入 token；持续对话模式保留当前会话的多轮上下文。
 - Edge 播报期间继续按约一秒的间隔查询新问题；收到有效提问时，结束旧音频和生成任务，再播放新回答，支持中途打断。
@@ -60,7 +62,7 @@ docker stop xiaogpt          # 停止服务
 
 ## 手动 Docker Compose 部署
 
-请使用 `deploy/router/Dockerfile`。根目录 Dockerfile 和 PDM 锁文件保留上游版本，不包含本部署层的 Edge 升级。
+默认使用已发布的 GHCR 镜像。需要自行构建时请使用 `deploy/router/Dockerfile`；根目录 Dockerfile 和 PDM 锁文件保留上游版本，不包含本部署层的 Edge 升级。
 
 ```sh
 git clone https://github.com/dongbo501/xiaogpt-router.git
@@ -76,13 +78,28 @@ chmod 600 config/config.yaml deploy/router/router.env
 首次登录如需短信验证，可以先在终端前台启动，按提示完成验证；令牌保存在 `config/` 中。完成后用 Ctrl+C 退出，再后台启动：
 
 ```sh
-docker compose --env-file deploy/router/router.env -f deploy/router/compose.yaml build
+docker compose --env-file deploy/router/router.env -f deploy/router/compose.yaml pull
 docker compose --env-file deploy/router/router.env -f deploy/router/compose.yaml run --rm -it xiaogpt
 docker compose --env-file deploy/router/router.env -f deploy/router/compose.yaml up -d
 docker compose --env-file deploy/router/router.env -f deploy/router/compose.yaml logs -f
 ```
 
 已有 `xiaogpt` 容器时，先备份配置并停止旧容器，再迁移，避免两个服务同时处理音箱。Compose 使用 Linux host 网络，音频只监听配置的局域网地址，默认端口 9527。
+
+## 镜像更新与 DPanel
+
+稳定更新标签为 `ghcr.io/dongbo501/xiaogpt-router:latest`，同时发布 `v1.0.0` 等版本标签和提交标签。镜像包含完整项目代码及兼容补丁；部署只需要持久化 `/config`，不要再将旧的 `xiaogpt.py`、`edge.py`、`miaccount.py` 等文件覆盖挂载到容器中。
+
+要让 DPanel 检查稳定版更新，创建容器时应明确填写完整的 `:latest` 镜像引用。已经用 `@sha256:...` 或镜像 ID 创建的容器需要重新创建；只对本地镜像执行 `docker tag` 不会修改容器的 `Config.Image`。保留原 `/config` 挂载后，账号令牌、聊天配置和固定提示音缓存均可继续使用。
+
+Compose 更新命令：
+
+```sh
+docker compose --env-file deploy/router/router.env -f deploy/router/compose.yaml pull
+docker compose --env-file deploy/router/router.env -f deploy/router/compose.yaml up -d
+```
+
+镜像版本是否更新由 DPanel 手动检查，默认仍禁用 Watchtower 自动替换本服务。源码构建产生的 `xiaogpt-router:local` 不提供注册表更新检测。
 
 ## 使用
 
@@ -101,13 +118,14 @@ docker compose --env-file deploy/router/router.env -f deploy/router/compose.yaml
 ## 离线检查
 
 ```sh
+docker build -f deploy/router/Dockerfile -t xiaogpt-router:local .
 docker run --rm --network none \
   -v "$PWD:/repo:ro" -w /repo \
   --entrypoint /app/.venv/bin/python xiaogpt-router:local \
   -m unittest discover -s tests -v
 ```
 
-GitHub Actions 仅提供手动检查，不自动发布 Docker Hub 镜像或 PyPI 包。
+GitHub Actions 保留手动离线检查；推送 `v*` 标签会先运行测试，再发布 AMD64 / ARM64 镜像到 GHCR，并创建 GitHub 源码 Release。发布流程也支持手动运行。不发布 Docker Hub 镜像或 PyPI 包。
 
 ## 配置与来源
 

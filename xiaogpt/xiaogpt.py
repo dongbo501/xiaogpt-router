@@ -411,6 +411,20 @@ class MiGPT:
                 f"{self.config.tts_command} {value}",
             )
 
+    async def _play_waiting_prompt(self):
+        if self.config.tts != "edge":
+            await self.do_tts(f"正在问{self.chatbot.name}请耐心等待")
+            return
+
+        # Finish the prompt before the answer reuses the audio player.
+        # Bound this optional playback so a TTS outage cannot block GPT.
+        async with asyncio.timeout(20):
+            prompt = await self.tts.cache_prompt(
+                "正在问 GPT，请耐心等待", self.mi_token_home.parent / "audio-cache"
+            )
+            await self.tts.play_file(prompt)
+        self.log.info("Waiting prompt completed from cached Edge audio")
+
     @functools.cached_property
     def tts(self) -> TTS:
         if self.config.tts == "mi":
@@ -478,8 +492,59 @@ class MiGPT:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
 
-    async def _speak_until_interrupted(self, query: str) -> dict | None:
+    async def _answer_with_waiting_prompt(self, query: str):
+        queue = asyncio.Queue()
+        started = time.monotonic()
+
+        async def collect():
+            first = True
+            self.log.info("Starting GPT request alongside waiting prompt")
+            try:
+                async with contextlib.aclosing(self.ask_gpt(query)) as stream:
+                    async for part in stream:
+                        if first:
+                            self.log.info(
+                                "GPT first text ready after %.2f seconds",
+                                time.monotonic() - started,
+                            )
+                            first = False
+                        queue.put_nowait(part)
+            finally:
+                queue.put_nowait(EOF)
+
+        producer = asyncio.create_task(collect())
+
+        async def buffered():
+            while True:
+                part = await queue.get()
+                if part is EOF:
+                    break
+                yield part
+            await producer
+
+        try:
+            await asyncio.sleep(0)
+            try:
+                await self._play_waiting_prompt()
+            except Exception as e:
+                self.log.warning(
+                    "Could not play waiting prompt; continuing with %s answer: %s",
+                    getattr(self.chatbot, "name", "GPT"),
+                    e,
+                )
+            async with contextlib.aclosing(buffered()) as stream:
+                await self.speak(stream)
+        finally:
+            producer.cancel()
+            await asyncio.gather(producer, return_exceptions=True)
+
+    async def _speak_until_interrupted(
+        self, query: str, *, with_prompt: bool = False
+    ) -> dict | None:
         async def answer():
+            if with_prompt:
+                await self._answer_with_waiting_prompt(query)
+                return
             async with contextlib.aclosing(self.ask_gpt(query)) as stream:
                 await self.speak(stream)
 
@@ -604,7 +669,6 @@ class MiGPT:
             if not self.config.mute_xiaoai:
                 # waiting for xiaoai speaker done
                 await asyncio.sleep(8)
-            await self.do_tts(f"正在问{self.chatbot.name}请耐心等待")
             try:
                 print(
                     "以下是小爱的回答：",
@@ -614,7 +678,7 @@ class MiGPT:
                 print("小爱没回")
             print(f"以下是 {self.chatbot.name} 的回答：", end="")
             try:
-                pending_record = await self._speak_until_interrupted(query)
+                pending_record = await self._speak_until_interrupted(query, with_prompt=True)
             except Exception as e:
                 print(f"{self.chatbot.name} 回答出错 {str(e)}")
             else:

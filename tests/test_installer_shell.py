@@ -28,6 +28,7 @@ elif tool == 'docker':
     if args[:2] == ['container', 'inspect']:
         sys.exit(0 if os.environ.get('EXISTING_CONTAINER') else 1)
     if args[0] == 'build' and os.environ.get('FAIL_BUILD'): sys.exit(1)
+    if args[0] == 'pull' and os.environ.get('FAIL_PULL'): sys.exit(1)
     if args[0] == 'run' and '--rm' in args:
         if os.environ.get('FAIL_SETUP'): sys.exit(1)
         for index, value in enumerate(args):
@@ -66,7 +67,7 @@ class InstallerShellTests(unittest.TestCase):
     def calls(self):
         return [json.loads(line) for line in self.log.read_text().splitlines()]
 
-    def run_installer(self, **extra):
+    def run_installer(self, installer_args=(), **extra):
         master, slave = pty.openpty()
         output = bytearray()
 
@@ -84,7 +85,7 @@ class InstallerShellTests(unittest.TestCase):
         reader.start()
         try:
             result = subprocess.run(
-                ["sh", str(ROOT / "install.sh"), "--dir", str(self.destination)],
+                ["sh", str(ROOT / "install.sh"), "--dir", str(self.destination), *installer_args],
                 stdin=slave, stdout=slave, stderr=slave,
                 env=dict(self.env, **extra), timeout=15,
             )
@@ -98,15 +99,17 @@ class InstallerShellTests(unittest.TestCase):
             os.close(master)
             reader.join(timeout=2)
 
-    def test_fresh_install_builds_configures_and_starts_in_order(self):
+    def test_fresh_install_pulls_latest_configures_and_starts_in_order(self):
         code, output = self.run_installer()
         self.assertEqual(code, 0, output)
         self.assertIn("安装完成", output)
         calls = self.calls()
         docker = [args for tool, *args in calls if tool == "docker"]
-        self.assertLess(next(i for i, args in enumerate(docker) if args[0] == "build"),
+        self.assertLess(next(i for i, args in enumerate(docker) if args[0] == "pull"),
                         next(i for i, args in enumerate(docker) if args[:2] == ["run", "--rm"]))
         launch = next(args for args in docker if args[:2] == ["run", "-d"])
+        self.assertIn("ghcr.io/dongbo501/xiaogpt-router:latest", launch)
+        self.assertFalse(any(args[0] == "build" for args in docker))
         self.assertIn(str(self.destination / "config") + ":/config", launch)
         self.assertIn(str(self.destination / "config/router.env"), launch)
         self.assertIn("--config=/config/config.json", launch)
@@ -137,9 +140,22 @@ class InstallerShellTests(unittest.TestCase):
         self.assertFalse((self.destination / ".install-lock").exists())
 
     def test_build_failure_does_not_configure_or_start(self):
-        code, _ = self.run_installer(FAIL_BUILD="1")
+        code, _ = self.run_installer(installer_args=("--build",), FAIL_BUILD="1")
         self.assertNotEqual(code, 0)
         self.assertFalse(any(call[:2] == ["docker", "run"] for call in self.calls()))
+
+    def test_pull_failure_does_not_configure_or_start(self):
+        code, _ = self.run_installer(FAIL_PULL="1")
+        self.assertNotEqual(code, 0)
+        self.assertFalse(any(call[:2] == ["docker", "run"] for call in self.calls()))
+
+    def test_explicit_source_build_remains_available(self):
+        code, output = self.run_installer(installer_args=("--build",))
+        self.assertEqual(code, 0, output)
+        self.assertTrue(any(call[:2] == ["docker", "build"] for call in self.calls()))
+        self.assertFalse(any(call[:2] == ["docker", "pull"] for call in self.calls()))
+        launch = next(call for call in self.calls() if call[:3] == ["docker", "run", "-d"])
+        self.assertIn("xiaogpt-router:local", launch)
 
     def test_setup_failure_can_resume_without_redownloading(self):
         code, _ = self.run_installer(FAIL_SETUP="1")
