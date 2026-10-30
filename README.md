@@ -43,6 +43,38 @@ docker stop xiaogpt          # 停止服务
 
 ## 本版本的改动
 
+### 中文 Web 管理中心（v1.1.0）
+
+默认地址为**路由器本机** `http://127.0.0.1:9988`。现有部署使用 host 网络，因此直接绑定宿主机回环地址，不需要也不使用 `-p 127.0.0.1:9988:9988`。音箱音频服务继续使用局域网地址和原端口，两者互不影响。管理页默认不监听局域网或公网。
+
+在电脑上通过 SSH 转发访问：
+
+```sh
+ssh -N -L 9988:127.0.0.1:9988 root@你的路由器IP
+# 然后在这台电脑浏览器打开 http://127.0.0.1:9988
+```
+
+也可以将现有反向代理的上游指向路由器 `127.0.0.1:9988`。首次管理密码自动生成，查看方式：
+
+```sh
+docker exec xiaogpt cat /config/web-initial-password.txt
+```
+
+登录后可在“维护与安全”修改管理密码，初始密码文件随后删除。管理密码与小米密码、API Key 相互独立，登录状态可跨容器重启保留。
+
+管理页面提供：
+
+- **接口与模型**：服务商下拉菜单、自定义地址、保存多套接口方案、读取模型列表及手动填写模型、真实接口测试。密钥只保存在路由器，不回显；更换地址时必须填写对应密钥或选用已保存方案。
+- **提示词与播报**：回答风格模板、可编辑提示词、等待/限流/额度不足/其他失败的自定义固定提示；留空关闭该提示。Edge 固定语音继续使用持久缓存。
+- **音箱与声音**：音色列表与自定义音色 ID、语速/音量/音调选择、触发词、持续对话口令、读取已登录账号下的设备列表。
+- **运行与维护**：状态、脱敏日志、配置自动备份与恢复、修改管理密码、保存设置、一键保存并重启容器。
+
+保存前校验配置；检测到其他页面或终端修改时拒绝覆盖。最近 20 份自动备份在 `/config/web-backups/`；接口方案、管理密码和音频缓存均保存在 `/config`，升级镜像时继续保留。
+
+“重启容器”由容器主进程收到请求后退出、Docker 的 `unless-stopped` 策略重新启动来实现，**不挂载 Docker socket**。因此部署须保持 `restart: unless-stopped` 或等价策略。语音服务由独立子进程运行，即使语音登录失败，管理页也会保持可用并显示状态。
+
+可通过 `XIAOGPT_WEB_HOST`、`XIAOGPT_WEB_PORT` 修改监听位置（需重建容器以改变环境变量）；默认 `127.0.0.1:9988`。需要原先的纯命令行入口或交互式小米验证码登录时，设置 `XIAOGPT_WEB_DISABLED=1`。
+
 - 固定 `edge-tts==7.3.1`，修复旧版请求校验导致的 HTTP 403。
 - Edge 音频边生成边传给音箱，一次回答只启动一个播放 URL，提前合成后续文字。
 - 音频缓存支持多个请求独立读取及 Range 重试，并处理播放结束后的重复请求。
@@ -79,7 +111,7 @@ chmod 600 config/config.yaml deploy/router/router.env
 
 ```sh
 docker compose --env-file deploy/router/router.env -f deploy/router/compose.yaml pull
-docker compose --env-file deploy/router/router.env -f deploy/router/compose.yaml run --rm -it xiaogpt
+docker compose --env-file deploy/router/router.env -f deploy/router/compose.yaml run --rm -it -e XIAOGPT_WEB_DISABLED=1 xiaogpt
 docker compose --env-file deploy/router/router.env -f deploy/router/compose.yaml up -d
 docker compose --env-file deploy/router/router.env -f deploy/router/compose.yaml logs -f
 ```

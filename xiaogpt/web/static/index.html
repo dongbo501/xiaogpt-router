@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>小爱 GPT · 管理中心</title><link rel="stylesheet" href="/style.css"><script defer src="/app.js"></script></head>
+<body>
+<div id="loginView" class="login-view hidden">
+  <form id="loginForm" class="login-card">
+    <div class="brand-mark">小</div><p class="eyebrow">XIAOGPT ROUTER</p><h1>让小爱更懂你</h1><p class="muted">登录后，管理接口、提示语和声音。</p>
+    <label for="loginPassword">管理密码</label><input id="loginPassword" type="password" autocomplete="current-password" required placeholder="输入管理密码">
+    <button class="primary wide" type="submit">进入管理中心 <span>→</span></button>
+    <p class="help">首次密码位于容器的<br><code>/config/web-initial-password.txt</code></p>
+    <p id="loginError" class="error-text" role="alert"></p>
+  </form>
+</div>
+<div id="appView" class="app-shell hidden">
+ <aside class="sidebar">
+  <a class="brand" href="#overview"><span class="brand-mark small">小</span><div>小爱 GPT<small>你的语音助手管理中心</small></div></a>
+  <nav aria-label="主导航">
+   <button data-tab="overview" class="nav-item active"><span>◫</span>运行概览</button>
+   <button data-tab="connection" class="nav-item"><span>⇄</span>接口与模型</button>
+   <button data-tab="prompts" class="nav-item"><span>≡</span>提示词与播报</button>
+   <button data-tab="voice" class="nav-item"><span>♫</span>音箱与声音</button>
+   <button data-tab="maintenance" class="nav-item"><span>⚙</span>维护与安全</button>
+  </nav>
+  <div class="sidebar-bottom"><span class="local-dot"></span>本机管理 <code>127.0.0.1:9988</code><p>配置保存在路由器<br>重启后自动加载</p><button id="logoutButton" class="text-button">退出登录 ↗</button></div>
+ </aside>
+ <main>
+  <header class="topbar"><div><p class="eyebrow">XIAOGPT / CONTROL CENTER</p><h1 id="pageTitle">运行概览</h1></div><div class="top-actions"><span id="statusPill" class="pill neutral">连接中</span><button id="refreshButton" class="secondary">刷新状态</button></div></header>
+  <div id="initialNotice" class="notice hidden">首次登录建议到“维护与安全”设置自己的管理密码。</div>
+  <div id="pendingNotice" class="notice hidden">设置已保存，重启容器后生效。<button id="pendingRestart" class="text-button">立即重启 →</button></div>
+  <section data-panel="overview" class="panel active">
+   <div class="hero"><div><span class="tag">让对话，按你的方式发生</span><h2>一处设置，即刻开聊。</h2><p>选择喜欢的模型和声音，再给小爱一点你的习惯。</p><button class="primary" data-go="connection">设置接口与模型 <span>→</span></button></div><div class="voice-art" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><div class="art-label">HELLO, XIAOAI.</div></div></div>
+   <div class="stats"><article><span>当前模型</span><strong id="summaryModel">—</strong><small id="summaryProvider">等待加载</small></article><article><span>语音服务</span><strong id="summaryService">—</strong><small id="summaryUptime">等待加载</small></article><article><span>当前声音</span><strong id="summaryVoice">—</strong><small>先播放提示，再播放回答</small></article></div>
+   <div class="two-columns"><article class="card"><div class="card-heading"><h2>从一句话开始</h2><span class="mini-label">使用方式</span></div><p class="quote">“小爱同学，请问太阳为什么会发光？”</p><div id="keywordPreview" class="chips"></div><p class="help">普通提问相互独立。说“开始持续对话”后，可以接着聊同一个话题。</p><button class="text-button" data-go="voice">调整触发词 →</button></article><article class="card"><div class="card-heading"><h2>常用操作</h2></div><button id="quickTest" class="action-row"><span><b>测试当前接口</b><small>检查密钥、模型和返回内容</small></span><span>↗</span></button><button id="restartButton" class="action-row"><span><b>重启容器</b><small>重新加载已保存的配置</small></span><span>↻</span></button><button class="action-row" data-go="maintenance"><span><b>查看日志与备份</b><small>遇到问题时，先看看具体原因</small></span><span>→</span></button></article></div>
+  </section>
+  <section data-panel="connection" class="panel">
+   <p class="section-intro">先选服务商，再选模型。可以保存多套接口方案，之后直接切换。</p>
+   <article class="card"><div class="card-heading"><h2>接口方案</h2><span class="mini-label">凭据仅保存在路由器</span></div><div class="form-grid"><label>已保存方案<select id="profileSelect"><option value="">当前配置 / 手动填写</option></select></label><label>方案名称<input id="profileName" placeholder="例如：日常使用、备用接口" maxlength="50"></label></div><div class="button-row"><button id="saveProfile" class="secondary">保存为新方案</button><button id="deleteProfile" class="text-button danger">删除所选方案</button></div></article>
+   <article class="card"><div class="card-heading"><h2>连接设置</h2><span class="step-badge">01</span></div><div class="form-grid"><label>服务商<select id="providerSelect"></select></label><label>接口地址（Base URL）<input id="apiBase" type="url" placeholder="https://example.com/v1" spellcheck="false"></label></div><p class="help">仅填写服务商接口地址。只填域名时自动补上 /v1；不要把密钥粘进地址。</p><label>API Key<div class="input-action"><input id="apiKey" type="password" autocomplete="new-password" placeholder="留空保留已保存密钥" spellcheck="false"><button id="toggleKey" class="secondary" type="button">显示</button></div></label><p id="keyHint" class="help">密钥不会回显。更换服务商时，请同时填写对应密钥。</p><div class="divider"></div><div class="form-grid"><label>模型名称<input id="model" list="modelList" placeholder="从列表选择，或填写模型 ID" spellcheck="false"><datalist id="modelList"></datalist></label><div class="field-bottom"><button id="loadModels" class="secondary">读取可用模型 ↓</button></div></div><p class="help">部分服务商不提供模型列表，此时手动输入控制台显示的模型 ID。</p><div class="button-row"><button id="testConnection" class="primary">测试接口连接</button><span class="help">发送一次简短测试，不修改设置，不播放声音。</span></div><div id="testResult" class="result-box hidden" role="status"></div></article>
+   <article class="card"><div class="card-heading"><h2>回答方式</h2></div><label class="switch-row"><span><b>流式回答</b><small>模型边回答，小爱边准备语音。</small></span><input id="stream" type="checkbox" role="switch"></label><details><summary>高级模型参数（一般不用改）</summary><div class="form-grid"><label>随机程度 temperature<input id="temperature" type="number" min="0" max="2" step="0.1" placeholder="留空使用模型默认"></label><label>回答 Token 上限<input id="maxTokens" type="number" min="1" step="1" placeholder="留空不额外限制"></label><label>Token 参数类型<select id="tokenField"><option value="max_completion_tokens">max_completion_tokens</option><option value="max_tokens">max_tokens</option></select></label><label>推理强度<select id="reasoning"><option value="">模型默认</option><option value="none">关闭</option><option value="minimal">极低</option><option value="low">低</option><option value="medium">中</option><option value="high">高</option><option value="xhigh">很高</option></select></label></div><p class="help">不同接口支持的参数可能不同；保持空白最兼容。</p></details></article>
+  </section>
+  <section data-panel="prompts" class="panel">
+   <p class="section-intro">“回答提示词”告诉模型怎么回答；“播报提示语”是音箱直接播放的固定语音。</p>
+   <article class="card"><div class="card-heading"><h2>回答提示词</h2><span class="step-badge">02</span></div><div class="form-grid"><label>快速模板<select id="promptPreset"><option value="">保留当前 / 自定义</option><option value="natural">自然口播</option><option value="brief">简洁直答</option><option value="explain">耐心讲解</option></select></label><p class="help field-bottom">选择模板会填入文本框，你仍可以自由修改。</p></div><label>自定义要求<textarea id="prompt" rows="11" maxlength="16000" placeholder="例如：用自然、清楚的中文回答，不读网址和引用标记。"></textarea></label><p class="help">修改后需保存并重启生效；不会自动限制回答字数。</p></article>
+   <article class="card"><div class="card-heading"><h2>固定播报提示语</h2><span class="mini-label">自动生成 · 本地缓存</span></div><label>开始等待时<input id="waitingPrompt" maxlength="200"></label><div class="form-grid"><label>接口限流时<input id="rateLimitPrompt" maxlength="200"></label><label>额度不足时<input id="quotaPrompt" maxlength="200"></label></div><label>其他失败时<input id="errorPrompt" maxlength="200"></label><p class="help">留空可关闭对应提示。Edge 模式首次使用时合成，以后复用缓存；更换文本或音色后自动生成新缓存。</p></article>
+  </section>
+  <section data-panel="voice" class="panel">
+   <p class="section-intro">声音和唤醒习惯，都可以选成你喜欢的样子。</p>
+   <article class="card"><div class="card-heading"><h2>声音设置</h2><span class="step-badge">03</span></div><div class="form-grid"><label>播报方式<select id="tts"><option value="edge">Edge 在线语音（推荐）</option><option value="mi">小爱原声</option></select></label><label>Edge 音色<input id="voice" list="voiceList" placeholder="选择音色或填写音色 ID"><datalist id="voiceList"></datalist></label><label>语速<select id="rate"></select></label><label>合成音量<select id="volume"></select></label><label>音调<select id="pitch"></select></label></div><p class="help">合成音量不等于音箱硬件音量。Edge 语音需要联网；固定提示会保存在路由器。</p><label class="switch-row"><span><b>提问时暂停小爱原回答</b><small>减少原声与 GPT 回答相互打扰。</small></span><input id="muteXiaoai" type="checkbox" role="switch"></label></article>
+   <article class="card"><div class="card-heading"><h2>触发词与持续对话</h2></div><label>触发词（每行一个）<textarea id="keywords" rows="5" placeholder="请问&#10;请解释&#10;请对比"></textarea></label><div class="button-row"><button id="commonKeywords" class="secondary">填入常用触发词</button><span class="help">普通模式下，以这些词开头才会调用 GPT。</span></div><div class="form-grid"><label>开始持续对话<input id="startConversation" maxlength="50"></label><label>结束持续对话<input id="endConversation" maxlength="50"></label></div></article>
+   <article class="card"><div class="card-heading"><h2>已连接音箱</h2><button id="loadDevices" class="secondary">读取账号下的音箱</button></div><label>选择音箱<select id="deviceSelect"><option value="">保留当前设备 / 手动设置</option></select></label><details><summary>手动设备设置</summary><div class="form-grid"><label>音箱型号<select id="hardware"></select></label><label>设备 DID<input id="miDid" spellcheck="false"></label></div><label class="switch-row"><span><b>使用设备指令</b><small>影响小爱原声和持续对话唤醒，通常保留当前设置。</small></span><input id="useCommand" type="checkbox" role="switch"></label></details></article>
+  </section>
+  <section data-panel="maintenance" class="panel">
+   <p class="section-intro">查看状态、恢复设置、管理登录密码。</p>
+   <article class="card"><div class="card-heading"><h2>最近日志</h2><button id="loadLogs" class="secondary">刷新日志</button></div><p class="help">只显示近期语音服务日志，凭据会隐藏。容器重启后日志窗口重新开始。</p><pre id="logs" class="log-view">点击“刷新日志”查看。</pre></article>
+   <article class="card"><div class="card-heading"><h2>配置备份</h2><button id="loadBackups" class="secondary">读取备份</button></div><p class="help">每次保存自动备份，保留最近 20 份。恢复会包括当时的接口、密钥和提示词；重启后生效。</p><div class="form-grid"><label>选择备份<select id="backupSelect"><option value="">请先读取备份</option></select></label><div class="field-bottom"><button id="restoreBackup" class="secondary">恢复所选备份</button></div></div></article>
+   <article class="card"><div class="card-heading"><h2>管理密码</h2></div><div class="form-grid"><label>当前密码<input id="oldPassword" type="password" autocomplete="current-password"></label><label>新密码（至少 10 位）<input id="newPassword" type="password" minlength="10" autocomplete="new-password"></label></div><button id="changePassword" class="secondary">更新管理密码</button><p class="help">只修改 Web 管理密码，不影响小米账号或 API 密钥。</p></article>
+  </section>
+  <footer class="save-bar"><div><strong id="saveState">设置已同步</strong><small id="configPath">/config/config.json</small></div><div class="button-row"><button id="saveButton" class="secondary">仅保存</button><button id="applyButton" class="primary">保存并重启容器 <span>↻</span></button></div></footer>
+ </main>
+</div>
+<div id="toast" class="toast hidden" role="status"></div>
+<dialog id="confirmDialog"><h2 id="confirmTitle">确认操作</h2><p id="confirmText"></p><div class="button-row end"><button id="confirmCancel" class="secondary">取消</button><button id="confirmOk" class="primary">确认</button></div></dialog>
+</body></html>

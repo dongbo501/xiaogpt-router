@@ -95,7 +95,7 @@ class QuestionPauseTests(unittest.IsolatedAsyncioTestCase):
                 runner.cancel()
                 await asyncio.gather(runner, return_exceptions=True)
 
-        self.assertEqual(events, ["pause", "正在问ChatGPT请耐心等待", "answer"])
+        self.assertEqual(events, ["pause", "正在问 GPT，请耐心等待", "answer"])
         self.bot.mina_service.player_pause.assert_awaited_once_with("speaker")
         self.bot.mina_service.player_get_status.assert_not_awaited()
 

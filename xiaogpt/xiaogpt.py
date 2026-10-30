@@ -412,11 +412,13 @@ class MiGPT:
             )
 
     async def _play_waiting_prompt(self):
+        if not self.config.waiting_prompt.strip():
+            return
         if self.config.tts != "edge":
-            await self.do_tts(f"正在问{self.chatbot.name}请耐心等待")
+            await self.do_tts(self.config.waiting_prompt)
             return
 
-        await self._play_cached_prompt("正在问 GPT，请耐心等待")
+        await self._play_cached_prompt(self.config.waiting_prompt)
         self.log.info("Waiting prompt completed from cached Edge audio")
 
     async def _play_cached_prompt(self, text: str):
@@ -432,16 +434,18 @@ class MiGPT:
         detail = str(error).lower()
         code = str(getattr(error, "code", "")).lower()
         if code == "insufficient_quota" or "insufficient_quota" in detail:
-            text = "GPT 服务额度不足，请检查接口账户。"
+            text = self.config.quota_prompt
         elif (
             getattr(error, "status_code", None) == 429
             or "rate_limit" in code
             or "rate limit" in detail
             or "tokens per minute" in detail
         ):
-            text = "GPT 服务暂时限流，请稍后再试。"
+            text = self.config.rate_limit_prompt
         else:
-            text = "GPT 暂时无法回答，请稍后再试。"
+            text = self.config.error_prompt
+        if not text.strip():
+            return
         if self.config.tts == "edge":
             await self._play_cached_prompt(text)
         else:

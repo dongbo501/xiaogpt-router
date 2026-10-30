@@ -75,6 +75,10 @@ class Config:
     keyword: Iterable[str] = KEY_WORD
     change_prompt_keyword: Iterable[str] = CHANGE_PROMPT_KEY_WORD
     prompt: str = PROMPT
+    waiting_prompt: str = "正在问 GPT，请耐心等待"
+    rate_limit_prompt: str = "GPT 服务暂时限流，请稍后再试。"
+    quota_prompt: str = "GPT 服务额度不足，请检查接口账户。"
+    error_prompt: str = "GPT 暂时无法回答，请稍后再试。"
     mute_xiaoai: bool = False
     bot: str = "chatgptapi"
     cookie: str = ""

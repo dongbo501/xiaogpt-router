@@ -7,6 +7,8 @@ services:
     environment:
       TZ: Asia/Shanghai
       PYTHONUNBUFFERED: "1"
+      XIAOGPT_WEB_HOST: "127.0.0.1"
+      XIAOGPT_WEB_PORT: "9988"
       XIAOGPT_HOSTNAME: ${XIAOGPT_HOSTNAME:?Set the router LAN address in router.env}
     volumes:
       - ../../config:/config

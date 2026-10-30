@@ -139,6 +139,7 @@ while [ "$attempt" -lt 60 ]; do
     [ "$state" = 'running 0' ] || fail '容器未正常运行。请用 docker logs --tail 100 xiaogpt 查看原因，配置与容器已保留。'
     if docker logs xiaogpt 2>&1 | grep -q 'Running xiaogpt now'; then
         printf '\n安装完成，服务已进入监听状态。\n配置：%s/config/config.json\n网络设置：%s/config/router.env\n\n试着说：小爱同学，请问太阳为什么会发光？\n查看日志：docker logs -f xiaogpt\n重启服务：docker restart xiaogpt\n' "$INSTALL_DIR" "$INSTALL_DIR"
+        printf '\nWeb 管理（路由器本机）：http://127.0.0.1:9988\n查看首次管理密码：docker exec xiaogpt cat /config/web-initial-password.txt\n在电脑上使用 SSH 转发后即可通过浏览器修改设置。详见 README 的 Web 管理章节。\n'
         exit 0
     fi
     attempt=$((attempt + 1))

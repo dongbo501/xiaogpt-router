@@ -6,3 +6,6 @@ COPY --from=edge-client /vendor /opt/xiaogpt-vendor
 COPY xiaogpt/ /app/xiaogpt/
 COPY deploy/router/miaccount.py /app/.venv/lib/python3.14/site-packages/miservice/miaccount.py
 ENV PYTHONPATH=/opt/xiaogpt-vendor
+ENV XIAOGPT_WEB_HOST=127.0.0.1 XIAOGPT_WEB_PORT=9988
+ENTRYPOINT ["/app/.venv/bin/python", "-m", "xiaogpt.web"]
+CMD ["--config=/config/config.json"]
