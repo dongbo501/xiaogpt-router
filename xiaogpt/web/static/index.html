@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="zh-CN">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>小爱 GPT · 管理中心</title><link rel="stylesheet" href="/style.css"><script defer src="/app.js"></script></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>小爱 GPT · 管理中心</title><link rel="stylesheet" href="/style.css"><script defer src="/connection.js"></script><script defer src="/app.js"></script></head>
 <body>
 <div id="loginView" class="login-view hidden">
   <form id="loginForm" class="login-card">
@@ -33,10 +33,34 @@
    <div class="two-columns"><article class="card"><div class="card-heading"><h2>从一句话开始</h2><span class="mini-label">使用方式</span></div><p class="quote">“小爱同学，请问太阳为什么会发光？”</p><div id="keywordPreview" class="chips"></div><p class="help">普通提问相互独立。说“开始持续对话”后，可以接着聊同一个话题。</p><button class="text-button" data-go="voice">调整触发词 →</button></article><article class="card"><div class="card-heading"><h2>常用操作</h2></div><button id="quickTest" class="action-row"><span><b>测试当前接口</b><small>检查密钥、模型和返回内容</small></span><span>↗</span></button><button id="restartButton" class="action-row"><span><b>重启容器</b><small>重新加载已保存的配置</small></span><span>↻</span></button><button class="action-row" data-go="maintenance"><span><b>查看日志与备份</b><small>遇到问题时，先看看具体原因</small></span><span>→</span></button></article></div>
   </section>
   <section data-panel="connection" class="panel">
-   <p class="section-intro">先选服务商，再选模型。可以保存多套接口方案，之后直接切换。</p>
-   <article class="card"><div class="card-heading"><h2>接口方案</h2><span class="mini-label">凭据仅保存在路由器</span></div><div class="form-grid"><label>已保存方案<select id="profileSelect"><option value="">当前配置 / 手动填写</option></select></label><label>方案名称<input id="profileName" placeholder="例如：日常使用、备用接口" maxlength="50"></label></div><div class="button-row"><button id="saveProfile" class="secondary">保存为新方案</button><button id="deleteProfile" class="text-button danger">删除所选方案</button></div></article>
-   <article class="card"><div class="card-heading"><h2>连接设置</h2><span class="step-badge">01</span></div><div class="form-grid"><label>服务商<select id="providerSelect"></select></label><label>接口地址（Base URL）<input id="apiBase" type="url" placeholder="https://example.com/v1" spellcheck="false"></label></div><p class="help">仅填写服务商接口地址。只填域名时自动补上 /v1；不要把密钥粘进地址。</p><label>API Key<div class="input-action"><input id="apiKey" type="password" autocomplete="new-password" placeholder="留空保留已保存密钥" spellcheck="false"><button id="toggleKey" class="secondary" type="button">显示</button></div></label><p id="keyHint" class="help">密钥不会回显。更换服务商时，请同时填写对应密钥。</p><div class="divider"></div><div class="form-grid"><label>模型名称<input id="model" list="modelList" placeholder="从列表选择，或填写模型 ID" spellcheck="false"><datalist id="modelList"></datalist></label><div class="field-bottom"><button id="loadModels" class="secondary">读取可用模型 ↓</button></div></div><p class="help">部分服务商不提供模型列表，此时手动输入控制台显示的模型 ID。</p><div class="button-row"><button id="testConnection" class="primary">测试接口连接</button><span class="help">发送一次简短测试，不修改设置，不播放声音。</span></div><div id="testResult" class="result-box hidden" role="status"></div></article>
-   <article class="card"><div class="card-heading"><h2>回答方式</h2></div><label class="switch-row"><span><b>流式回答</b><small>模型边回答，小爱边准备语音。</small></span><input id="stream" type="checkbox" role="switch"></label><details><summary>高级模型参数（一般不用改）</summary><div class="form-grid"><label>随机程度 temperature<input id="temperature" type="number" min="0" max="2" step="0.1" placeholder="留空使用模型默认"></label><label>回答 Token 上限<input id="maxTokens" type="number" min="1" step="1" placeholder="留空不额外限制"></label><label>Token 参数类型<select id="tokenField"><option value="max_completion_tokens">max_completion_tokens</option><option value="max_tokens">max_tokens</option></select></label><label>推理强度<select id="reasoning"><option value="">模型默认</option><option value="none">关闭</option><option value="minimal">极低</option><option value="low">低</option><option value="medium">中</option><option value="high">高</option><option value="xhigh">很高</option></select></label></div><p class="help">不同接口支持的参数可能不同；保持空白最兼容。</p></details></article>
+   <p class="section-intro">接口就是提供 AI 回答的服务。只换模型时，直接看第 2 步，不用重新填密钥。</p>
+   <div class="connection-current"><div><span id="connectionSavedLabel" class="mini-label">已保存的设置</span><strong id="connectionSavedModel">—</strong><span id="connectionSavedProvider">—</span></div><p id="connectionSavedHint">正在确认运行状态…</p></div>
+   <article class="card connection-step">
+    <div class="step-heading"><span class="step-number">1</span><div><h2>用哪个接口？</h2><p>继续用当前接口，或从下拉菜单切换。</p></div></div>
+    <label for="profileSelect">选择接口</label><select id="profileSelect" aria-describedby="selectionHint"></select>
+    <p id="selectionHint" class="selection-hint" role="status"></p>
+    <details id="connectionDetails" class="connection-details"><summary id="connectionDetailsLabel">查看地址或更换密钥</summary>
+     <label id="providerField">接口服务商<select id="providerSelect"></select></label>
+     <label>接口地址<input id="apiBase" type="url" placeholder="粘贴服务商给你的地址，例如 https://example.com/v1" spellcheck="false" aria-describedby="addressHelp"></label>
+     <p id="addressHelp" class="help">选择服务商会自动填写地址；选“其他服务商”时自己粘贴。只填域名也可以，不要把密钥放进地址。</p>
+     <label>接口密钥（API Key）<div class="input-action"><input id="apiKey" type="password" autocomplete="new-password" spellcheck="false" aria-describedby="keyHint"><button id="toggleKey" class="secondary" type="button">显示</button></div></label><p id="keyHint" class="help"></p>
+    </details>
+   </article>
+   <article class="card connection-step">
+    <div class="step-heading"><span class="step-number">2</span><div><h2>用哪个模型回答？</h2><p>先读取这个接口的模型，再从列表里选。</p></div></div>
+    <div class="model-picker"><label for="modelSelect">回答模型<select id="modelSelect" aria-describedby="modelHint"></select></label><button id="loadModels" class="secondary">读取模型列表</button></div>
+    <label id="manualModelField" class="hidden">手动填写模型名称<input id="model" placeholder="填写服务商提供的完整模型名称" spellcheck="false"></label>
+    <p id="modelHint" class="help" role="status">可以保留当前模型，也可以读取列表后更换。</p>
+   </article>
+   <article class="card connection-step">
+    <div class="step-heading"><span class="step-number">3</span><div><h2>确认后，应用到小爱</h2><p>测试会请求一次简短回答，不会让音箱出声。</p></div></div>
+    <div class="connection-review"><div><span>准备使用的接口</span><strong id="reviewProvider">—</strong></div><div><span>准备使用的模型</span><strong id="reviewModel">—</strong></div></div>
+    <div class="button-row"><button id="testConnection" class="secondary">只测试，不修改设置</button><button id="resetConnection" class="text-button">撤销本页接口修改</button></div>
+    <div id="testResult" class="result-box hidden" role="status"></div>
+    <p id="connectionNext" class="next-step" role="status">选好后，点击页面底部“测试并应用到小爱”。测试通过才会保存并重启。</p>
+   </article>
+   <details class="card optional-card"><summary>已保存接口的管理（可选）</summary><p class="help">想以后从第 1 步直接切换，可以把上面填写的地址、密钥和模型记在列表里。这里只管理列表，不会切换小爱正在使用的接口。</p><label>给这个接口起个名字<input id="profileName" placeholder="例如：日常接口、备用接口" maxlength="50"></label><div class="button-row"><button id="saveProfile" class="secondary">添加到已保存列表</button><button id="deleteProfile" class="text-button danger">从列表移除所选接口</button></div><p id="profileHint" class="help"></p></details>
+   <details class="card optional-card"><summary>回答方式与高级参数（一般不用改）</summary><label class="switch-row"><span><b>流式回答</b><small>模型边回答，小爱边准备语音。</small></span><input id="stream" type="checkbox" role="switch"></label><div class="form-grid"><label>随机程度<input id="temperature" type="number" min="0" max="2" step="0.1" placeholder="留空使用模型默认"></label><label>回答长度上限（Token）<input id="maxTokens" type="number" min="1" step="1" placeholder="留空不额外限制"></label><label>长度上限的参数类型<select id="tokenField"><option value="max_completion_tokens">max_completion_tokens（较新模型）</option><option value="max_tokens">max_tokens（其他兼容模型）</option></select></label><label>思考强度<select id="reasoning"><option value="">模型默认</option><option value="none">关闭</option><option value="minimal">极低</option><option value="low">低</option><option value="medium">中</option><option value="high">高</option><option value="xhigh">很高</option></select></label></div><p class="help">不确定时保留默认。修改后同样需要应用到小爱。</p></details>
   </section>
   <section data-panel="prompts" class="panel">
    <p class="section-intro">“回答提示词”告诉模型怎么回答；“播报提示语”是音箱直接播放的固定语音。</p>

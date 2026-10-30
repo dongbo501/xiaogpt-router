@@ -8,6 +8,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - name: Check web interaction flow
+        run: |
+          node --check xiaogpt/web/static/app.js
+          node --test tests/test_web_connection.cjs
       - name: Build router image
         run: docker build -f deploy/router/Dockerfile -t xiaogpt-router:local .
       - name: Run offline checks

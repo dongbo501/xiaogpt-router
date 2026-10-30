@@ -163,6 +163,11 @@ class WebApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.client.post("/api/restart", json={})).status, 401)
         self.assertFalse(self.app["restart_event"].is_set())
 
+    async def test_connection_flow_script_is_served_without_authentication(self):
+        response = await self.client.get("/connection.js")
+        self.assertEqual(response.status, 200)
+        self.assertIn("ConnectionForm", await response.text())
+
     async def test_session_csrf_and_cross_origin_protection(self):
         await self.login()
         self.assertEqual((await self.client.post("/api/restart", json={})).status, 403)

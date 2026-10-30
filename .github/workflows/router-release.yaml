@@ -14,6 +14,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7.0.1
+      - name: Check web interaction flow
+        run: |
+          node --check xiaogpt/web/static/app.js
+          node --test tests/test_web_connection.cjs
       - uses: docker/setup-qemu-action@v4.4.0
       - uses: docker/setup-buildx-action@v4.4.1
       - name: Build test image

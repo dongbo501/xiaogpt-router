@@ -265,7 +265,7 @@ def create_app(store: SettingsStore, supervisor, *, restart_event=None):
             return web.json_response({"error": "读取音箱列表失败，请检查小米登录状态；也可以手动填写 DID 和型号"}, status=502)
 
     async def static(request):
-        name = {"/": "index.html", "/app.js": "app.js", "/style.css": "style.css"}[request.path]
+        name = {"/": "index.html", "/app.js": "app.js", "/connection.js": "connection.js", "/style.css": "style.css"}[request.path]
         return web.FileResponse(STATIC / name)
 
     app.router.add_get("/api/session", session)
@@ -284,6 +284,6 @@ def create_app(store: SettingsStore, supervisor, *, restart_event=None):
     app.router.add_post("/api/test", probe)
     app.router.add_post("/api/models", probe)
     app.router.add_post("/api/devices", devices)
-    for path in ("/", "/app.js", "/style.css"):
+    for path in ("/", "/app.js", "/connection.js", "/style.css"):
         app.router.add_get(path, static)
     return app

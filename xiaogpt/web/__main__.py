@@ -48,7 +48,7 @@ class Supervisor:
         return {"running": running, "ready": running and self.ready, "worker_restarts": self.failures,
                 "uptime": int(time.time() - self.started), "pid": self.process.pid if running else None,
                 "web_bind": os.getenv("XIAOGPT_WEB_HOST", "127.0.0.1") + ":" + os.getenv("XIAOGPT_WEB_PORT", "9988"),
-                "version": "1.1.0", "restart_mode": "container" if os.getpid() == 1 else "process"}
+                "version": "1.1.1", "restart_mode": "container" if os.getpid() == 1 else "process"}
 
     async def run(self):
         try:
